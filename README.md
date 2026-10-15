@@ -15,6 +15,7 @@ When you download your library from Google Photos through Google Takeout, the fi
 This script reads that JSON metadata and:
 
 - **Sets the original date** on each file (Modified and Accessed everywhere, plus Created on Windows)
+- **Matches numbered duplicates** such as `photo(1).jpg` to their JSON files, even though Takeout names them differently
 - **Shows both local time and UTC** for every file it fixes
 - **Cleans up** by deleting each JSON file after it has been used (optional)
 - **Prints a colour-coded report** so you can see exactly what happened
@@ -33,11 +34,18 @@ Platform: Linux
 Searching for Google Photos metadata...
 
 Checking: IMG_0001.jpg
+  -> JSON: IMG_0001.jpg.supplemental-metadata.json
   -> DATE SET: 2019-01-01 05:30:00 (local)  |  2019-01-01 00:00:00 UTC
   -> SOURCE: photoTakenTime
   -> JSON DELETED
 
-Checking: IMG_0002.png
+Checking: IMG_0002(1).jpg
+  -> JSON: IMG_0002.jpg.supplemental-metadata(1).json
+  -> DATE SET: 2019-03-14 10:15:00 (local)  |  2019-03-14 04:45:00 UTC
+  -> SOURCE: photoTakenTime
+  -> JSON DELETED
+
+Checking: IMG_0003.png
   -> JSON NOT FOUND
 ...
 Files successfully processed : 1234
@@ -67,7 +75,7 @@ You need your photos downloaded from Google Takeout and **extracted**:
 > Point the script at the folder named **Google Photos**. It contains subfolders such as `Photos from 2019` and your album folders. The script searches all subfolders automatically.
 
 > [!IMPORTANT]
-> Back up your Takeout folder before you start. See the [warning below](#-warning-json-files-are-deleted-permanently).
+> Back up your Takeout folder before you start. See the [warning below](#️-warning-json-files-are-deleted-permanently).
 
 ### 2. Installation
 
@@ -158,17 +166,37 @@ photo.jpg.supplemental-metadata.json
 
 For every non-JSON file, the script:
 
-1. Looks for `<file name>.supplemental-metadata.json` in the same folder
+1. Looks for the matching JSON in the same folder (see [JSON name matching](#json-name-matching))
 2. Reads `photoTakenTime` from it, falling back to `creationTime`
 3. Sets the file's dates to that moment
 4. Deletes the JSON file (unless `--keep-json` is used)
 
 Takeout timestamps are UTC. The exact moment written to the file is correct on any computer, but File Explorer and Finder display it in your **local time zone**.
 
+### JSON name matching
+
+When Takeout finds several files with the same name, it adds a counter such as `(1)`. The counter goes **before the extension** on the photo, but **before `.json`** on the metadata file:
+
+```
+IMG_1234(1).jpg   ->   IMG_1234.jpg.supplemental-metadata(1).json
+```
+
+The script tries these names for each photo, in order, and uses the first one that exists:
+
+| # | Photo | JSON it looks for |
+| --- | --- | --- |
+| 1 | `photo.jpg` | `photo.jpg.supplemental-metadata.json` |
+| 2 | `photo.jpg` | `photo.jpg.json` (older Takeout exports) |
+| 3 | `photo(1).jpg` | `photo.jpg.supplemental-metadata(1).json` |
+| 4 | `photo(1).jpg` | `photo.jpg(1).json` (older Takeout exports) |
+
+A numbered photo is never matched to the un-numbered JSON. That JSON describes a different photo, so using it would silently give the wrong date.
+
 ## Limitations
 
 - **EXIF data is not changed.** The script sets file system dates only, so the "Date Taken" value inside the image stays as it was. If you need EXIF written too, use a tool such as [ExifTool](https://exiftool.org/).
-- **Exact JSON name matching.** The JSON must be named exactly `<file name>.supplemental-metadata.json`. Takeout sometimes names JSON files for numbered duplicates (like `photo(1).jpg`) differently, and shortens very long names. Such files are reported as `JSON NOT FOUND`, skipped, and left unchanged. Edited copies such as `photo-edited.jpg` usually have no JSON of their own and are skipped too.
+- **Shortened JSON names.** Takeout cuts very long file names (around 46 characters) in the JSON name, so those files are not matched. They are reported as `JSON NOT FOUND`, skipped, and left unchanged.
+- **Edited copies.** Files such as `photo-edited.jpg` usually have no JSON of their own and are skipped.
 - **Creation date on Linux** can't be set (a Linux limitation).
 - **Dates after copying.** Some tools, cloud uploads and file managers reset timestamps. Check after moving files.
 
@@ -176,7 +204,7 @@ Takeout timestamps are UTC. The exact moment written to the file is correct on a
 
 | Message | Meaning |
 | --- | --- |
-| `JSON NOT FOUND` | No matching `.supplemental-metadata.json` next to the file. The file is skipped. |
+| `JSON NOT FOUND` | No matching metadata file next to the file. The file is skipped. |
 | `NO PHOTO DATE FOUND` | The JSON has no usable timestamp. The file is skipped and the JSON is kept. |
 | `ERROR: Permission denied` | The file is read-only or locked by another program. Close it and run again. |
 | `ERROR: Invalid JSON` | The JSON file is corrupted. The file is skipped. |
@@ -188,7 +216,7 @@ Takeout timestamps are UTC. The exact moment written to the file is correct on a
 
 Issues and pull requests are welcome. Ideas that would be especially useful:
 
-- Matching for numbered duplicates and shortened JSON names
+- Matching for shortened JSON names
 - Optional EXIF writing
 - A `--dry-run` mode that reports what would change without changing anything
 
