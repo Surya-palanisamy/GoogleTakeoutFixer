@@ -1,229 +1,314 @@
 # Google Photos Takeout Date Fixer
 
-A small, dependency-free Python script that restores the original dates of your photos and videos after exporting them with **Google Takeout**. Works on **Windows, macOS and Linux**.
+A small, dependency-free Python script that restores the original file timestamps of photos and videos exported with **Google Takeout**.
 
-## The Issue
+This version is designed for **Windows**. It reads the date from each media file's Google Takeout `.json` sidecar and updates the file's Windows **Created, Modified, and Accessed** timestamps.
 
-When you download your library from Google Photos through Google Takeout, the files usually lose their original dates. Photos and videos end up with the date you *downloaded* or *extracted* them, so:
+> **Important:** This script changes file-system timestamps only. It does not edit the photo or video itself, and it does not write EXIF metadata.
 
-- File Explorer / Finder sorts your photos in the wrong order
-- Photo managers that fall back to file dates show everything as "recently added"
-- The original date is only stored in a separate `.json` file next to each photo
+## The issue
 
-## Solution
+When you export your Google Photos library using Google Takeout, the downloaded or extracted files may have dates that reflect when they were downloaded or extracted rather than when the photos were originally taken.
 
-This script reads that JSON metadata and:
+Google Takeout stores additional metadata in a separate JSON file beside the media file. This script reads that metadata and uses it to restore the file timestamps.
 
-- **Sets the original date** on each file (Modified and Accessed everywhere, plus Created on Windows)
-- **Matches numbered duplicates** such as `photo(1).jpg` to their JSON files, even though Takeout names them differently
-- **Shows both local time and UTC** for every file it fixes
-- **Cleans up** by deleting each JSON file after it has been used (optional)
-- **Prints a colour-coded report** so you can see exactly what happened
+## Features
+
+- **Restores original dates** using `photoTakenTime`, falling back to `creationTime`.
+- **Updates Windows timestamps:** Created, Modified, and Accessed.
+- **Matches numbered duplicates**, such as `photo(1).jpg` with `photo.jpg.supplemental-metadata(1).json`.
+- **Supports older JSON naming patterns**, including `photo.jpg.json`.
+- **Handles some shortened Takeout sidecar names** when the shortened name still matches the expected metadata suffix.
+- **Lets you choose whether to keep or delete JSON files** each time the program runs. Keeping them is the default.
+- **Scans subfolders recursively**.
+- **Shows a scan report, progress bar, and final summary**.
+- **Supports multiple worker threads** to process files concurrently.
+- Uses only Python's standard library. No third-party packages or ExifTool are required.
 
 ## Preview
 
-```
-============================================================
-       GOOGLE PHOTOS TAKEOUT DATE FIXER
-============================================================
+The exact counts and paths depend on your Takeout export. A typical run looks like this:
 
-Folder:
-/home/me/Takeout/Google Photos/Photos from 2019
+```text
+╭────────────────────────────────────────────────────────────────╮
+│  GOOGLE PHOTOS TAKEOUT  •  DATE FIXER                           │
+│  Kolkata IST  •  Windows Created + Modified + Accessed          │
+╰────────────────────────────────────────────────────────────────╯
 
-Platform: Linux
-Searching for Google Photos metadata...
+ABOUT THIS TOOL
+  Restores the original photo/video dates using Google Takeout JSON files.
+  Updates Windows Created, Modified and Accessed timestamps; media content is not edited.
 
-Checking: IMG_0001.jpg
-  -> JSON: IMG_0001.jpg.supplemental-metadata.json
-  -> DATE SET: 2019-01-01 05:30:00 (local)  |  2019-01-01 00:00:00 UTC
-  -> SOURCE: photoTakenTime
-  -> JSON DELETED
+HOW TO RUN
+  1. Extract your Google Photos Takeout ZIP file.
+  2. Open Command Prompt or PowerShell in the folder containing this script.
+  3. Run: python fix_google_photos_date.py
+  4. Choose whether to keep or delete the JSON sidecars, then confirm the date update.
 
-Checking: IMG_0002(1).jpg
-  -> JSON: IMG_0002.jpg.supplemental-metadata(1).json
-  -> DATE SET: 2019-03-14 10:15:00 (local)  |  2019-03-14 04:45:00 UTC
-  -> SOURCE: photoTakenTime
-  -> JSON DELETED
+Folder:    D:\Takeout
+Mode:      LIVE APPLY  (file dates will be changed)
+Workers:   2
 
-Checking: IMG_0003.png
-  -> JSON NOT FOUND
-...
-Files successfully processed : 1234
-JSON not found               : 5
-No timestamp found           : 0
-Errors                       : 0
-JSON files deleted           : 1234
-JSON delete failed           : 0
+What should happen to the JSON sidecar files?
+  [K] Keep JSON files (recommended / default)
+  [D] Delete each JSON only after its media file date is updated successfully
+  Your choice [K/D, default K]:
 ```
 
-In a real terminal the output is colour-coded (green = success, yellow = skipped, red = error).
+After scanning, the script displays a scan result, asks you to type `YES` before changing dates (unless `--yes` is supplied), and then shows processing progress and a summary.
+
+The terminal uses colour-coded output when supported. Colours are disabled automatically when output is not an interactive terminal.
 
 ## Tutorial
 
-### 1. Preparation
+### 1. Prepare your Google Takeout export
 
-You need your photos downloaded from Google Takeout and **extracted**:
+1. Visit [Google Takeout](https://takeout.google.com/).
+2. Click **Deselect all**.
+3. Select **Google Photos**.
+4. Click **Next step**.
+5. Choose how you want to receive the export and create it.
+6. Download the archive files from Google's email.
+7. Extract the archives.
 
-1. Go to [takeout.google.com](https://takeout.google.com/) and click **Deselect all**.
-2. Scroll down and select only **Google Photos**.
-3. Scroll to the bottom and click **Next step**.
-4. Choose how to receive the download (email link is the simplest) and a file size for the archives.
-5. Click **Create export**, wait for Google's email, then download the archives.
-6. Extract every archive. If your export was split into several archives, extract them all into the **same folder** so each photo sits next to its JSON file.
+If Google splits your export into multiple archives, extract all of them into the same destination folder while preserving the folder structure.
 
-> [!NOTE]
-> Point the script at the folder named **Google Photos**. It contains subfolders such as `Photos from 2019` and your album folders. The script searches all subfolders automatically.
+> **Tip:** Point the script at the main `Google Photos` folder. It searches that folder and its subfolders automatically.
 
-> [!IMPORTANT]
-> Back up your Takeout folder before you start. See the [warning below](#️-warning-json-files-are-deleted-permanently).
+### 2. Install Python
 
-### 2. Installation
+Install Python on Windows from [python.org](https://www.python.org/downloads/).
 
-1. Install **Python 3.7 or newer** from [python.org](https://www.python.org/downloads/) (on Windows, tick *"Add Python to PATH"* during setup). Check with:
+During installation, enable **Add Python to PATH**.
 
-   ```
-   python --version
-   ```
+Open Command Prompt or PowerShell and check the installation:
 
-   On macOS and Linux the command may be `python3`.
-
-2. Get the script, either by cloning the repo:
-
-   ```
-   git clone https://github.com/YOUR-USERNAME/google-photos-takeout-date-fixer.git
-   cd google-photos-takeout-date-fixer
-   ```
-
-   or by downloading `fix_google_photos_dates.py` directly from this page.
-
-There is nothing else to install. The script only uses Python's standard library.
-
-### 3. Using the script
-
-Run it and pass your Takeout folder:
-
-```
-python fix_google_photos_dates.py "/path/to/Takeout/Google Photos"
+```powershell
+python --version
 ```
 
-Windows example:
+This script uses only the Python standard library. There are no additional packages to install.
 
+### 3. Download the script
+
+Download `fix_google_photos_date.py` and save it somewhere convenient.
+
+Your folder can look like this:
+
+```text
+YourFolder/
+├── fix_google_photos_date.py
+└── Takeout/
+    └── Google Photos/
+        ├── Photos from 2019/
+        ├── Photos from 2020/
+        └── ...
 ```
-python fix_google_photos_dates.py "C:\Users\me\Pictures\Takeout\Google Photos"
+
+### 4. Run the script
+
+Open Command Prompt or PowerShell in the folder containing the script.
+
+Run it without a folder argument:
+
+```powershell
+python fix_google_photos_date.py
 ```
 
-If you don't pass a folder, the script asks you to type or paste one.
+The program will ask you to enter the path to your Google Photos Takeout folder.
 
-When it finishes, check a few photos in File Explorer or Finder to confirm the dates look right.
+Or provide the folder path directly:
 
----
+```powershell
+python fix_google_photos_date.py "D:\Takeout\Google Photos"
+```
 
-### Command line options
+Use quotation marks around paths that contain spaces.
 
-| Option | What it does |
+### 5. Choose what to do with JSON files
+
+The program asks:
+
+```text
+What should happen to the JSON sidecar files?
+  [K] Keep JSON files (recommended / default)
+  [D] Delete each JSON only after its media file date is updated successfully
+  Your choice [K/D, default K]:
+```
+
+- Press **Enter** or type `K` to keep JSON files.
+- Type `D` to delete a JSON sidecar after its corresponding media file's timestamps have been updated successfully.
+
+**Keeping JSON files is recommended for your first run.**
+
+### 6. Confirm the changes
+
+The script scans the folder and displays the number of files found, matched JSON sidecars, missing JSON files, JSON files without a usable timestamp, and JSON read errors.
+
+It then asks you to type:
+
+```text
+Type YES to continue:
+```
+
+Only an exact `YES` proceeds. Any other response cancels the operation.
+
+When processing finishes, check several files in File Explorer to verify their timestamps.
+
+## Command-line options
+
+| Option | Description |
 | --- | --- |
-| `folder` | Folder to process (searched recursively). Optional. The script asks if omitted. |
-| `--keep-json` | Do **not** delete the JSON files after setting the dates. |
-| `--no-color` | Turn off coloured output. |
-| `-h`, `--help` | Show the help message. |
+| `folder` | Optional folder to process. All subfolders are searched. If omitted, the script asks for a folder path. |
+| `--workers N` | Number of parallel worker threads. Default: `2`. |
+| `--yes` | Skips the final `YES` confirmation. It does **not** skip the JSON keep/delete question. |
+| `--ascii` | Uses plain ASCII symbols instead of Unicode box-drawing characters. |
+| `--no-color` | Disables coloured terminal output. |
+| `-h`, `--help` | Displays command-line help. |
 
-Colours also turn off automatically when output is piped to a file, or when the `NO_COLOR` environment variable is set.
+### Examples
 
-Examples:
+Process a folder using the default settings:
 
-```
-# Keep the JSON files (safest first run)
-python fix_google_photos_dates.py "/path/to/Google Photos" --keep-json
-
-# Save the log to a file
-python fix_google_photos_dates.py "/path/to/Google Photos" > log.txt
+```powershell
+python fix_google_photos_date.py "D:\Takeout\Google Photos"
 ```
 
-## ⚠️ Warning: JSON files are deleted permanently
+Use four worker threads:
 
-By default, a JSON file is **permanently deleted** (not sent to the Recycle Bin / Trash) right after its photo's date has been set successfully. JSON files that were not used, for example because of an error or a missing timestamp, are left untouched.
+```powershell
+python fix_google_photos_date.py "D:\Takeout\Google Photos" --workers 4
+```
 
-**Recommended:** run once on a small copy of your data, or use `--keep-json`, and verify the dates before deleting anything.
+Use ASCII symbols:
 
-Your photos and videos themselves are never modified or deleted. Only their file timestamps change.
+```powershell
+python fix_google_photos_date.py "D:\Takeout\Google Photos" --ascii
+```
 
-## Which dates are set on each system
+Disable colours:
 
-| System | Dates set |
+```powershell
+python fix_google_photos_date.py "D:\Takeout\Google Photos" --no-color
+```
+
+Skip the final confirmation prompt:
+
+```powershell
+python fix_google_photos_date.py "D:\Takeout\Google Photos" --yes
+```
+
+> `--yes` does not bypass the JSON keep/delete selection. The script still asks whether to keep or delete sidecar files.
+
+## Warning: JSON deletion is permanent
+
+If you choose `D`, the script permanently deletes each matching JSON sidecar after the corresponding media file's timestamps have been set successfully. The files are not moved to the Windows Recycle Bin.
+
+JSON files are not deleted when:
+- No matching sidecar is found.
+- The JSON cannot be read.
+- The JSON does not contain a usable timestamp.
+- Updating the corresponding media file's timestamps fails.
+
+**Recommended first run:**
+
+1. Keep a backup of your original Takeout folder.
+2. Test the script on a small copy of your export.
+3. Choose `K` to keep all JSON sidecars.
+4. Check the resulting file dates.
+5. Only choose `D` when you are confident that the results are correct and you no longer need those JSON files.
+
+Your photo and video contents are not edited or deleted by this script. Their Windows file timestamps are changed.
+
+## Which dates are set?
+
+| Platform | Supported dates |
 | --- | --- |
-| Windows | Created, Modified, Accessed |
-| macOS | Modified, Accessed. Created too if `SetFile` is installed (`xcode-select --install`). Without it, macOS usually still lowers the creation date to match. |
-| Linux | Modified, Accessed. Linux has no settable creation date. |
+| Windows | Created, Modified, and Accessed |
+
+**Windows only:** The script uses the Windows `SetFileTime` API through Python's `ctypes` module. It exits with a message on macOS or Linux.
+
+The script writes the timestamp represented by the Unix timestamp in the Takeout JSON. Windows displays that moment according to the computer's configured time zone. The program's banner and final reminder refer to India Standard Time (IST).
 
 ## How it works
 
-Google Takeout stores metadata next to each file:
+Google Takeout stores metadata beside a media file. For example:
 
-```
+```text
 photo.jpg
 photo.jpg.supplemental-metadata.json
 ```
 
-For every non-JSON file, the script:
+For each non-skipped file, the script:
 
-1. Looks for the matching JSON in the same folder (see [JSON name matching](#json-name-matching))
-2. Reads `photoTakenTime` from it, falling back to `creationTime`
-3. Sets the file's dates to that moment
-4. Deletes the JSON file (unless `--keep-json` is used)
+1. Searches for a matching JSON sidecar in the same folder.
+2. Reads `photoTakenTime.timestamp`.
+3. If that value is unavailable, tries `creationTime.timestamp`.
+4. Converts the Unix timestamp to Windows file time.
+5. Sets the file's Created, Accessed, and Modified timestamps.
+6. Keeps or deletes the JSON sidecar according to your selection.
 
-Takeout timestamps are UTC. The exact moment written to the file is correct on any computer, but File Explorer and Finder display it in your **local time zone**.
+The script searches directories recursively and processes matched files using a thread pool.
 
 ### JSON name matching
 
-When Takeout finds several files with the same name, it adds a counter such as `(1)`. The counter goes **before the extension** on the photo, but **before `.json`** on the metadata file:
+Google Takeout may add a number to duplicate filenames. For example:
 
+```text
+IMG_1234(1).jpg
+IMG_1234.jpg.supplemental-metadata(1).json
 ```
-IMG_1234(1).jpg   ->   IMG_1234.jpg.supplemental-metadata(1).json
-```
 
-The script tries these names for each photo, in order, and uses the first one that exists:
+The script checks several possible names, including:
 
-| # | Photo | JSON it looks for |
-| --- | --- | --- |
-| 1 | `photo.jpg` | `photo.jpg.supplemental-metadata.json` |
-| 2 | `photo.jpg` | `photo.jpg.json` (older Takeout exports) |
-| 3 | `photo(1).jpg` | `photo.jpg.supplemental-metadata(1).json` |
-| 4 | `photo(1).jpg` | `photo.jpg(1).json` (older Takeout exports) |
+| Media file | JSON sidecar checked |
+| --- | --- |
+| `photo.jpg` | `photo.jpg.supplemental-metadata.json` |
+| `photo.jpg` | `photo.jpg.json` |
+| `photo(1).jpg` | `photo.jpg.supplemental-metadata(1).json` |
+| `photo(1).jpg` | `photo.jpg(1).json` |
 
-A numbered photo is never matched to the un-numbered JSON. That JSON describes a different photo, so using it would silently give the wrong date.
+It also has matching logic for `-edited` filenames and some shortened `.supplemental-metadata` sidecar names.
 
 ## Limitations
 
-- **EXIF data is not changed.** The script sets file system dates only, so the "Date Taken" value inside the image stays as it was. If you need EXIF written too, use a tool such as [ExifTool](https://exiftool.org/).
-- **Shortened JSON names.** Takeout cuts very long file names (around 46 characters) in the JSON name, so those files are not matched. They are reported as `JSON NOT FOUND`, skipped, and left unchanged.
-- **Edited copies.** Files such as `photo-edited.jpg` usually have no JSON of their own and are skipped.
-- **Creation date on Linux** can't be set (a Linux limitation).
-- **Dates after copying.** Some tools, cloud uploads and file managers reset timestamps. Check after moving files.
+- **Windows only:** macOS and Linux are not supported by this version.
+- **File timestamps only:** EXIF metadata such as the image's internal Date Taken field is not changed.
+- **No ExifTool integration:** The script does not write metadata into image or video files.
+- **Shortened sidecar names:** Only shortened names that satisfy the script's matching rule can be found. Other shortened names may be reported as missing.
+- **Edited copies:** The script may associate a `-edited` file with the original file's JSON sidecar. Review your results if you have edited copies.
+- **Time zone display:** Windows displays timestamps using the system's time zone. Set Windows to your intended time zone before checking the displayed dates.
+- **File-system behaviour:** External drives, cloud-sync tools, copying, and other applications may alter timestamps after this script runs.
 
 ## Troubleshooting
 
-| Message | Meaning |
+| Message or symptom | What it means / what to do |
 | --- | --- |
-| `JSON NOT FOUND` | No matching metadata file next to the file. The file is skipped. |
-| `NO PHOTO DATE FOUND` | The JSON has no usable timestamp. The file is skipped and the JSON is kept. |
-| `ERROR: Permission denied` | The file is read-only or locked by another program. Close it and run again. |
-| `ERROR: Invalid JSON` | The JSON file is corrupted. The file is skipped. |
-| `Folder does not exist` | Check the path. Wrap paths containing spaces in quotes. |
-| Strange characters instead of colours | Run with `--no-color`. |
-| `python` is not recognized | Reinstall Python and tick *Add Python to PATH*, or use `py` (Windows) / `python3` (macOS, Linux). |
+| `This script only works on Windows.` | The current version supports Windows only. |
+| `Folder does not exist!` | Check the folder path and make sure it is wrapped in quotes if it contains spaces. |
+| `JSON not found` | No matching sidecar was found. The media file is skipped. |
+| `No timestamp in JSON` | The JSON did not contain a usable `photoTakenTime` or `creationTime` timestamp. |
+| `JSON read errors` | One or more sidecar files could not be read or parsed. |
+| `Permission denied` | Close applications using the file and check your Windows permissions. |
+| Strange symbols in the terminal | Try the `--ascii` option. |
+| Colours are difficult to read | Try the `--no-color` option. |
+| `python` is not recognized | Reinstall Python with **Add Python to PATH** enabled, or use the Python launcher `py`. |
 
 ## Contributing
 
-Issues and pull requests are welcome. Ideas that would be especially useful:
+Suggestions, bug reports, and pull requests are welcome.
 
-- Matching for shortened JSON names
-- Optional EXIF writing
-- A `--dry-run` mode that reports what would change without changing anything
+Useful future improvements could include:
+
+- A dry-run mode that reports planned changes without applying them.
+- More robust matching for shortened Google Takeout JSON filenames.
+- Optional EXIF metadata writing.
+- Cross-platform support for macOS and Linux.
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Add your chosen license file and update this section before publishing. If you intend to use the MIT License, include the full MIT License text in a file named `LICENSE`.
 
 ## Disclaimer
 
-This project is not affiliated with Google LLC. It is provided as-is, without warranty. Always keep a backup of your original data. The authors are not responsible for any data loss.
+This project is not affiliated with Google LLC. It is provided as-is, without warranty. Always keep a backup of your original data before changing file timestamps or deleting JSON sidecars.
